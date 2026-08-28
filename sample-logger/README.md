@@ -1,24 +1,34 @@
-# Sample Logger
+# Sample Logger — Preclarus eReq Flow
 
-A lightweight, responsive web app for logging laboratory samples. Every submission
-is appended as a new row in a **Google Sheet** via a Google Apps Script Web App,
-and the app is designed for **free, one-click deployment to GitHub Pages**.
+A responsive web app that reproduces the **Electronic Requisition (eReq) sample-logging
+flow** from the PPD Preclarus Investigator Site Portal (Central Lab Manual, FORM-05150).
+It walks the user through the same sequence shown in the manual screenshots —
+register a subject, pick a visit, enter demographics, scan samples — and on submit
+appends the requisition to a **Google Sheet** via a Google Apps Script Web App.
 
 Built with **React + Vite + Tailwind CSS**. No backend server to maintain — your
-Google Sheet _is_ the database.
+Google Sheet _is_ the database. Designed for **free, one-click deployment to
+GitHub Pages** via `npm run deploy`.
 
 ![tech](https://img.shields.io/badge/React-18-61dafb) ![tech](https://img.shields.io/badge/Vite-6-646cff) ![tech](https://img.shields.io/badge/Tailwind-3-38bdf8)
 
 ---
 
-## Features
+## The User Flow
 
-- 📋 Form for **Sample ID, Timestamp, Sample Type, Location/Source, Tested By, Status, Notes**
-- ✅ Client-side **validation** blocks submission when required fields are missing
-- 📊 Clean, responsive **table** of samples logged in the current session
-- ☁️ **Google Sheets sync** on every submission (async `fetch` POST)
-- ⏳ Full **UI state handling**: disabled button + spinner while sending, success/error banners
-- 🚀 Pre-configured for **GitHub Pages** (relative `base` path + GitHub Actions workflow)
+The interface is a **4-step wizard** inside the purple *PPD Preclarus · Investigator
+Site Portal* chrome, mirroring the manual:
+
+| Step | Screen | What happens |
+|------|--------|--------------|
+| **1** | **Register a New Subject** | Select the Protocol ID (`ITF - Site: 9001`), click **＋ New Subject**, and fill the **Create New Subject: Details** modal — Subject ID (8 chars), Year of Birth (YYYY), Gender. Required fields show a **red** border; "will result in a Query" fields show an **orange** border, exactly as the manual describes. |
+| **2** | **Select Protocol, Subject, and Visit** | Protocol and Subject are carried forward (read-only); pick a **Visit** (`1 Screening (D -60 to -31)`, `2 Baseline`, `3 (Wk 1)`, …). |
+| **3** | **Demographic and Clinical Information** | Subject banner is read-only; enter **Is Pregnancy Test Required?**, **Weight**, and unit. |
+| **4** | **Enter Sample Collection Details** | Set **Collection Date & Time**, then **Enter / Scan Barcode** — each barcode populates against the next sample in the panel table (`24Hr Creatinine Clearance`, `Chemistry`, `Urinalysis`, …). A live **"_X_ of _N_ samples scanned"** counter updates, each row shows a **Scanned/Unscan** status, and **Save / Submit** posts everything to Google Sheets. |
+| ✓ | **Visit Saved** | Confirmation panel echoing the manual's "Visit information has been saved successfully", with a summary and **New Visit** to start over. |
+
+A numbered **stepper** (echoing the manual's yellow circles) tracks progress and lets
+you jump back. Only **scanned** samples are submitted — one **row per sample**.
 
 ---
 
@@ -35,19 +45,18 @@ Google Sheet _is_ the database.
 
 ## 1. Google Sheets Setup
 
-You need a Google Sheet plus an Apps Script Web App that receives POST requests
-and appends rows.
+You need a Google Sheet plus an Apps Script Web App that receives the requisition
+and appends **one row per scanned sample**.
 
 ### Step 1 — Create the sheet
 
 1. Go to [sheets.new](https://sheets.new) to create a new Google Sheet.
 2. Rename the first tab to **`Samples`** (bottom-left tab name).
-3. Add a header row in **row 1** with these column names (order matters — it must
-   match the script below):
+3. Add a header row in **row 1** (order matters — it must match the script):
 
-   | A | B | C | D | E | F | G | H |
-   |---|---|---|---|---|---|---|---|
-   | Logged At | Sample ID | Timestamp | Sample Type | Location/Source | Tested By | Status | Notes |
+   | A | B | C | D | E | F | G | H | I | J | K |
+   |---|---|---|---|---|---|---|---|---|---|---|
+   | Logged At | Protocol | Subject ID | Year of Birth | Gender | Visit | Pregnancy Test Required | Weight | Sample Name | Barcode | Collection Date |
 
 ### Step 2 — Add the Apps Script
 
@@ -55,7 +64,7 @@ and appends rows.
 2. Delete any existing code and paste the following:
 
 ```javascript
-// Appends one row per POST request to the "Samples" sheet.
+// Appends one row per scanned sample in the submitted requisition.
 function doPost(e) {
   try {
     // The app sends the body as text/plain JSON to avoid a CORS preflight.
@@ -69,19 +78,28 @@ function doPost(e) {
       throw new Error('Sheet "Samples" not found. Rename your tab to "Samples".');
     }
 
-    sheet.appendRow([
-      new Date(),            // Logged At (server timestamp)
-      data.sampleId || '',
-      data.timestamp || '',
-      data.sampleType || '',
-      data.location || '',
-      data.testedBy || '',
-      data.status || '',
-      data.notes || ''
-    ]);
+    var loggedAt = new Date();
+    var samples = data.samples || [];
+
+    // One row per sample so each specimen is individually trackable.
+    samples.forEach(function (s) {
+      sheet.appendRow([
+        loggedAt,                        // Logged At (server timestamp)
+        data.protocol || '',
+        data.subjectId || '',
+        data.yearOfBirth || '',
+        data.gender || '',
+        data.visit || '',
+        data.pregnancyTestRequired || '',
+        (data.weight || '') + (data.weightUnit ? ' ' + data.weightUnit : ''),
+        s.name || '',
+        s.barcode || '',
+        s.collectionDate || ''
+      ]);
+    });
 
     return ContentService
-      .createTextOutput(JSON.stringify({ result: 'success' }))
+      .createTextOutput(JSON.stringify({ result: 'success', rows: samples.length }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService
@@ -90,7 +108,7 @@ function doPost(e) {
   }
 }
 
-// Optional: lets you open the /exec URL in a browser to confirm it's live.
+// Optional: open the /exec URL in a browser to confirm it's live.
 function doGet() {
   return ContentService
     .createTextOutput(JSON.stringify({ result: 'ok', message: 'Sample Logger endpoint is live.' }))
@@ -109,9 +127,9 @@ function doGet() {
    - **Execute as:** **Me** (your account)
    - **Who has access:** **Anyone** ← _important, so the public page can post_
 4. Click **Deploy**.
-5. **Authorize access** when prompted (choose your account → *Advanced* →
-   *Go to project (unsafe)* → *Allow*). This warning is expected for your own script.
-6. Copy the **Web app URL**. It looks like:
+5. **Authorize access** when prompted (your account → *Advanced* → *Go to project
+   (unsafe)* → *Allow*). This warning is expected for your own script.
+6. Copy the **Web app URL**:
 
    ```
    https://script.google.com/macros/s/AKfycb..................../exec
@@ -124,7 +142,7 @@ function doGet() {
 
 ## 2. App Configuration
 
-Paste the Web App URL from above into **[`src/config.js`](src/config.js)**:
+Paste the Web App URL into **[`src/config.js`](src/config.js)**:
 
 ```javascript
 export const GOOGLE_SHEETS_WEBHOOK_URL =
@@ -132,16 +150,15 @@ export const GOOGLE_SHEETS_WEBHOOK_URL =
   'https://script.google.com/macros/s/AKfycb..................../exec' // ← paste here
 ```
 
-Or, to keep the URL out of source, set it via an environment variable
-(see [`.env.example`](.env.example)):
+Or keep it out of source with an env var (see [`.env.example`](.env.example)):
 
 ```bash
 # .env  (git-ignored)
 VITE_GOOGLE_SHEETS_WEBHOOK_URL=https://script.google.com/macros/s/AKfycb.../exec
 ```
 
-You can also customize the dropdown options (`SAMPLE_TYPES`, `STATUS_OPTIONS`) in
-the same file.
+The same file also lets you customize the domain lists to match your study:
+`PROTOCOLS`, `VISITS`, `GENDERS`, `WEIGHT_UNITS`, and the **`SAMPLE_NAMES`** panel.
 
 ---
 
@@ -150,79 +167,57 @@ the same file.
 **Prerequisites:** [Node.js](https://nodejs.org) 18+ and npm.
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Start the dev server (hot reload)
-npm run dev
-# → open the printed URL, usually http://localhost:5173
-
-# 3. Build a production bundle
-npm run build
-
-# 4. Preview the production build locally
-npm run preview
+npm install       # install dependencies
+npm run dev       # start dev server (hot reload) → http://localhost:5173
+npm run build     # production build into ./dist
+npm run preview   # preview the production build locally
 ```
 
-Fill out the form and submit — a new row should appear in your Google Sheet, and
-the entry shows up in the session table with a success banner.
+Walk the wizard, scan a few barcodes on step 4, and click **Save / Submit** — the
+scanned samples should appear as new rows in your Google Sheet, and the app advances
+to the **Visit Saved** screen.
+
+> **npm cache permission error?** If `npm install` fails with `EACCES` on
+> `~/.npm`, run `sudo chown -R $(id -u):$(id -g) "$HOME/.npm"` once, then retry.
 
 ---
 
 ## 4. GitHub Pages Deployment
 
-Two ways to publish. **Option A (GitHub Actions)** is the recommended 1-click path.
+### Option A — `npm run deploy` (gh-pages branch)
 
-### Option A — GitHub Actions (recommended)
-
-The repo already includes [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
-which builds and deploys on every push to `main`.
-
-1. **Create a GitHub repo** and push this project:
-
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit: Sample Logger"
-   git branch -M main
-   git remote add origin https://github.com/<your-username>/<your-repo>.git
-   git push -u origin main
-   ```
-
-2. On GitHub, go to **Settings → Pages**.
-3. Under **Build and deployment → Source**, select **GitHub Actions**.
-4. That's it. Push (or re-run the workflow from the **Actions** tab) and, once the
-   job finishes, your site is live at:
-
-   ```
-   https://<your-username>.github.io/<your-repo>/
-   ```
-
-> The workflow needs Pages permissions, which are already declared in the YAML.
-> The first run may take a minute or two.
-
-> **Keeping the webhook secret?** Add it under **Settings → Secrets and variables →
-> Actions → New repository secret** named `GOOGLE_SHEETS_WEBHOOK_URL`, then
-> uncomment the `env:` block in the workflow's **Build** step.
-
-### Option B — `gh-pages` branch (manual)
-
-A `deploy` script using the [`gh-pages`](https://www.npmjs.com/package/gh-pages)
-package is included in `package.json`:
+The [`gh-pages`](https://www.npmjs.com/package/gh-pages) package and a `deploy`
+script are pre-configured in `package.json`:
 
 ```bash
-npm install          # installs gh-pages (a devDependency)
+git init
+git add .
+git commit -m "Initial commit: Sample Logger eReq"
+git branch -M main
+git remote add origin https://github.com/<your-username>/<your-repo>.git
+git push -u origin main
+
 npm run build
-npm run deploy       # pushes ./dist to the gh-pages branch
+npm run deploy        # pushes ./dist to the gh-pages branch
 ```
 
-Then set **Settings → Pages → Source** to **Deploy from a branch**, branch
-**`gh-pages`**, folder **`/ (root)`**.
+Then on GitHub go to **Settings → Pages → Source → Deploy from a branch**, choose
+branch **`gh-pages`**, folder **`/ (root)`**. Your site goes live at:
+
+```
+https://<your-username>.github.io/<your-repo>/
+```
 
 > **Base path:** [`vite.config.js`](vite.config.js) uses `base: './'` (relative
-> paths), so the build works under `https://<user>.github.io/<repo>/` without
-> knowing the repo name. If you deploy to a custom domain or the repo root, you can
-> change it to `'/'`.
+> asset paths), so the build works under `…github.io/<repo>/` no matter the repo
+> name — no edits needed.
+
+### Option B — GitHub Actions (automatic on push)
+
+A workflow at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds
+and deploys on every push to `main`. To use it, set **Settings → Pages → Source**
+to **GitHub Actions**. (To keep the webhook URL secret, add a repo secret
+`GOOGLE_SHEETS_WEBHOOK_URL` and uncomment the `env:` block in the workflow.)
 
 ---
 
@@ -230,27 +225,30 @@ Then set **Settings → Pages → Source** to **Deploy from a branch**, branch
 
 ```
 sample-logger/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml         # GitHub Actions → GitHub Pages
-├── public/                    # static assets (served as-is)
+├── .github/workflows/deploy.yml   # optional GitHub Actions → Pages
 ├── src/
 │   ├── components/
-│   │   ├── Alert.jsx          # success/error/info banner
-│   │   ├── Spinner.jsx        # inline loading spinner
-│   │   ├── SampleForm.jsx     # form + validation
-│   │   └── SampleTable.jsx    # session data table
-│   ├── App.jsx                # layout + fetch/submit logic
-│   ├── config.js              # GOOGLE_SHEETS_WEBHOOK_URL + dropdown options
-│   ├── main.jsx               # React entry point
-│   └── index.css              # Tailwind directives
-├── .env.example               # sample env var file
-├── .gitignore
+│   │   ├── PortalChrome.jsx        # purple PPD Preclarus header + nav + sub-tabs
+│   │   ├── Stepper.jsx             # numbered progress rail
+│   │   ├── CreateSubjectModal.jsx  # "Create New Subject: Details" modal
+│   │   ├── ui.jsx                  # Field / buttons / Callout / requirement legend
+│   │   ├── Alert.jsx               # success/error/info banner
+│   │   └── Spinner.jsx             # inline loading spinner
+│   ├── steps/
+│   │   ├── Step1Registration.jsx   # protocol + new subject
+│   │   ├── Step2Visit.jsx          # protocol / subject / visit
+│   │   ├── Step3Demographic.jsx    # clinical info
+│   │   ├── Step4Samples.jsx        # collection date + barcode scan + sample table
+│   │   └── VisitSaved.jsx          # confirmation
+│   ├── App.jsx                     # wizard state machine + fetch/submit
+│   ├── config.js                   # GOOGLE_SHEETS_WEBHOOK_URL + domain lists
+│   ├── main.jsx
+│   └── index.css                   # Tailwind directives
 ├── index.html
-├── package.json
+├── package.json                    # includes `deploy` (gh-pages) script
+├── tailwind.config.js              # Preclarus purple/green/amber palette
 ├── postcss.config.js
-├── tailwind.config.js
-├── vite.config.js
+├── vite.config.js                  # base: './'
 └── README.md
 ```
 
@@ -261,19 +259,20 @@ sample-logger/
 | Symptom | Likely cause & fix |
 |---|---|
 | **"No Google Sheets webhook configured"** banner | `GOOGLE_SHEETS_WEBHOOK_URL` is empty. Paste your `/exec` URL into `src/config.js`. |
-| Submission fails with a network/CORS error | Re-deploy the Apps Script with **Who has access: Anyone**. The app sends `text/plain` on purpose to avoid a CORS preflight — don't change it to `application/json`. |
-| Rows not appearing in the sheet | Make sure the tab is named exactly **`Samples`** and the header order matches the script. |
+| Submit fails with a network/CORS error | Re-deploy the Apps Script with **Who has access: Anyone**. The app sends `text/plain` on purpose to skip the CORS preflight — don't switch it to `application/json`. |
+| No rows appear in the sheet | Tab must be named exactly **`Samples`**; header order must match the script. Also confirm at least one sample was **Scanned** (only scanned rows are submitted). |
 | Changed the script but nothing updates | Redeploy via **Manage deployments → Edit → New version**, keeping the same URL. |
-| Blank page / 404 assets on GitHub Pages | Confirm `base: './'` in `vite.config.js` and that Pages **Source** is set correctly (GitHub Actions _or_ `gh-pages` branch). |
-| Site not updating after push | Check the **Actions** tab for a failed run; re-run if needed. |
+| Blank page / 404 assets on GitHub Pages | Confirm `base: './'` in `vite.config.js` and that Pages **Source** matches your method (gh-pages branch _or_ Actions). |
+| `npm install` fails with `EACCES` | `sudo chown -R $(id -u):$(id -g) "$HOME/.npm"`, then retry. |
 
 ---
 
 ## Notes
 
-- The session table is **in-memory only** — refreshing the page clears it. The
-  permanent record lives in your Google Sheet.
-- No credentials are stored in the app; the Apps Script runs as _you_ and only
+- Requisition state lives in memory during the session; the permanent record is in
+  your Google Sheet. **New Visit** resets the wizard.
+- No credentials are stored in the app — the Apps Script runs as _you_ and only
   appends rows.
-- Inspired by the eReq sample-registration workflow in the PPD Preclarus
-  Investigator Site Portal.
+- UI, terminology, and the sample panel are modeled on the PPD Preclarus eReq
+  workflow (Central Lab Manual, FORM-05150 v5.0) for demonstration purposes.
+```

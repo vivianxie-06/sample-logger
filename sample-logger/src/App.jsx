@@ -1,15 +1,54 @@
 import { useState } from 'react'
-import SampleForm from './components/SampleForm.jsx'
-import SampleTable from './components/SampleTable.jsx'
+import PortalChrome from './components/PortalChrome.jsx'
+import Stepper from './components/Stepper.jsx'
 import Alert from './components/Alert.jsx'
-import { GOOGLE_SHEETS_WEBHOOK_URL } from './config.js'
+import Step1Registration from './steps/Step1Registration.jsx'
+import Step2Visit from './steps/Step2Visit.jsx'
+import Step3Demographic from './steps/Step3Demographic.jsx'
+import Step4Samples from './steps/Step4Samples.jsx'
+import VisitSaved from './steps/VisitSaved.jsx'
+import {
+  GOOGLE_SHEETS_WEBHOOK_URL,
+  PROTOCOLS,
+  SAMPLE_NAMES,
+} from './config.js'
+
+const USER_EMAIL = 'sabrina.wood@ppd.com'
+
+// A fresh, empty requisition.
+function emptyReq() {
+  return {
+    protocol: PROTOCOLS[0],
+    subject: null, // { subjectId, yearOfBirth, gender }
+    visit: '',
+    demographic: { pregnancyTestRequired: '', weight: '', weightUnit: '' },
+    collectionDateTime: '',
+    samples: SAMPLE_NAMES.map((name) => ({
+      name,
+      barcode: '',
+      collectionDate: '',
+      status: 'Unscanned',
+    })),
+  }
+}
+
+const STEP_TITLES = [
+  'How to Register a New Subject',
+  'Select Protocol, Subject, and Visit',
+  'Demographic and Clinical Information',
+  'Enter Sample Collection Details',
+]
 
 export default function App() {
-  const [samples, setSamples] = useState([])
+  const [step, setStep] = useState(0) // 0..3 wizard, 4 = saved
+  const [data, setData] = useState(emptyReq)
   const [submitting, setSubmitting] = useState(false)
-  const [alert, setAlert] = useState(null) // { type, message }
+  const [alert, setAlert] = useState(null)
+  const [savedSummary, setSavedSummary] = useState(null)
 
-  async function handleSubmit(values) {
+  const update = (patch) => setData((d) => ({ ...d, ...patch }))
+
+  async function handleSubmit() {
     setAlert(null)
 
     if (!GOOGLE_SHEETS_WEBHOOK_URL) {
@@ -18,81 +57,89 @@ export default function App() {
         message:
           'No Google Sheets webhook configured. Set GOOGLE_SHEETS_WEBHOOK_URL in src/config.js (see README).',
       })
-      return false
+      return
+    }
+
+    const scanned = data.samples.filter((s) => s.status === 'Scanned')
+    const payload = {
+      protocol: data.protocol,
+      subjectId: data.subject.subjectId,
+      yearOfBirth: data.subject.yearOfBirth,
+      gender: data.subject.gender,
+      visit: data.visit,
+      pregnancyTestRequired: data.demographic.pregnancyTestRequired,
+      weight: data.demographic.weight,
+      weightUnit: data.demographic.weightUnit,
+      collectionDateTime: data.collectionDateTime,
+      samples: scanned.map((s) => ({
+        name: s.name,
+        barcode: s.barcode,
+        collectionDate: s.collectionDate,
+        status: s.status,
+      })),
     }
 
     setSubmitting(true)
     try {
-      // NOTE: We send the body as text/plain on purpose. Google Apps Script
-      // web apps do not respond to CORS preflight (OPTIONS) requests, and a
-      // JSON content-type would trigger one. text/plain is a "simple request"
-      // that skips preflight while still delivering a JSON string the server
-      // parses with JSON.parse(e.postData.contents).
-      const response = await fetch(GOOGLE_SHEETS_WEBHOOK_URL, {
+      // text/plain avoids a CORS preflight that Apps Script can't answer.
+      const res = await fetch(GOOGLE_SHEETS_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(values),
+        body: JSON.stringify(payload),
       })
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`)
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`)
+      const result = await res.json().catch(() => ({}))
+      if (result.result && result.result !== 'success') {
+        throw new Error(result.message || 'Unknown error from Google Sheets.')
       }
 
-      // Apps Script returns { result: 'success' } on success.
-      const data = await response.json().catch(() => ({}))
-      if (data.result && data.result !== 'success') {
-        throw new Error(data.message || 'Unknown error from Google Sheets.')
-      }
-
-      // Add to the session table with a stable local id.
-      setSamples((prev) => [
-        { ...values, _id: `${values.sampleId}-${prev.length}-${values.timestamp}` },
-        ...prev,
-      ])
-      setAlert({
-        type: 'success',
-        message: `Sample "${values.sampleId}" logged and synced to Google Sheets.`,
+      setSavedSummary({
+        subjectId: payload.subjectId,
+        visit: payload.visit,
+        count: scanned.length,
       })
-      return true
+      setStep(4)
     } catch (err) {
       setAlert({
         type: 'error',
-        message: `Failed to log sample: ${err.message}. It was not saved — please try again.`,
+        message: `Failed to save visit: ${err.message}. Nothing was submitted — please try again.`,
       })
-      return false
     } finally {
       setSubmitting(false)
     }
   }
 
+  function newVisit() {
+    setData(emptyReq())
+    setSavedSummary(null)
+    setAlert(null)
+    setStep(0)
+  }
+
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900">
-      {/* Header */}
-      <header className="bg-brand text-white shadow">
-        <div className="mx-auto max-w-5xl px-4 py-5">
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-            Sample Logger
+    <PortalChrome userEmail={USER_EMAIL}>
+      {step === 4 ? (
+        <VisitSaved summary={savedSummary} onNewVisit={newVisit} />
+      ) : (
+        <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <h1 className="mb-1 text-lg font-bold text-ppd-purple">
+            {STEP_TITLES[step]}
           </h1>
-          <p className="mt-1 text-sm text-purple-100">
-            Log laboratory samples and sync each entry to Google Sheets.
+          <p className="mb-5 text-xs text-gray-400">
+            Electronic Requisition · Step {step + 1} of 4
           </p>
-        </div>
-      </header>
 
-      <main className="mx-auto max-w-5xl space-y-8 px-4 py-8">
-        {/* Config warning */}
-        {!GOOGLE_SHEETS_WEBHOOK_URL && (
-          <Alert
-            type="info"
-            message="Setup needed: paste your Google Apps Script Web App URL into src/config.js (GOOGLE_SHEETS_WEBHOOK_URL) to enable syncing. See the README."
-          />
-        )}
+          <Stepper current={step} />
 
-        {/* Form card */}
-        <section className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <h2 className="mb-4 text-lg font-semibold text-gray-800">
-            Log a new sample
-          </h2>
+          {!GOOGLE_SHEETS_WEBHOOK_URL && (
+            <div className="mb-4">
+              <Alert
+                type="info"
+                message="Setup needed: paste your Google Apps Script Web App URL into src/config.js (GOOGLE_SHEETS_WEBHOOK_URL) to enable syncing. See the README."
+              />
+            </div>
+          )}
+
           {alert && (
             <div className="mb-4">
               <Alert
@@ -102,27 +149,41 @@ export default function App() {
               />
             </div>
           )}
-          <SampleForm onSubmit={handleSubmit} submitting={submitting} />
-        </section>
 
-        {/* Table card */}
-        <section className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-800">
-              This session
-            </h2>
-            <span className="rounded-full bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
-              {samples.length} logged
-            </span>
-          </div>
-          <SampleTable samples={samples} />
-        </section>
-      </main>
-
-      <footer className="mx-auto max-w-5xl px-4 pb-8 text-center text-xs text-gray-400">
-        Session-only table · data persists in your Google Sheet · deployed on
-        GitHub Pages
-      </footer>
-    </div>
+          {step === 0 && (
+            <Step1Registration
+              data={data}
+              update={update}
+              onNext={() => setStep(1)}
+            />
+          )}
+          {step === 1 && (
+            <Step2Visit
+              data={data}
+              update={update}
+              onNext={() => setStep(2)}
+              onBack={() => setStep(0)}
+            />
+          )}
+          {step === 2 && (
+            <Step3Demographic
+              data={data}
+              update={update}
+              onNext={() => setStep(3)}
+              onBack={() => setStep(1)}
+            />
+          )}
+          {step === 3 && (
+            <Step4Samples
+              data={data}
+              update={update}
+              onSubmit={handleSubmit}
+              onBack={() => setStep(2)}
+              submitting={submitting}
+            />
+          )}
+        </div>
+      )}
+    </PortalChrome>
   )
 }
