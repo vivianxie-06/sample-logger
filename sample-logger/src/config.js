@@ -4,14 +4,14 @@
 // Paste your Google Apps Script Web App URL here after deploying it.
 // See the README for step-by-step setup instructions.
 //
-//   https://script.google.com/macros/s/AKfycb.................../exec
+//   https://script.google.com/macros/s/AKfycbz3Bh5ynTwIAjQ4Q3-vaE7Lq41dvHHKGLrWnBEcavn8xbmT8HUwV_fAyPUuf6SWY_a4_Q/exec
 //
 // You can also override this at build time with a Vite env var:
 //   VITE_GOOGLE_SHEETS_WEBHOOK_URL=... npm run build
 // ---------------------------------------------------------------------------
 
-export const GOOGLE_SHEETS_WEBHOOK_URL =
-  import.meta.env.VITE_GOOGLE_SHEETS_WEBHOOK_URL || ''
+export const GOOGLE_SHEETS_WEBHOOK_URL = 
+  import.meta.env.VITE_GOOGLE_SHEETS_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbz3Bh5ynTwIAjQ4Q3-vaE7Lq41dvHHKGLrWnBEcavn8xbmT8HUwV_fAyPUuf6SWY_a4_Q/exec'
 
 // Protocol / Site options for the top-left dropdown ("ITF - Site: 9001").
 export const PROTOCOLS = ['ITF - Site: 9001']
