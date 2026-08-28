@@ -10,9 +10,7 @@
 //   VITE_GOOGLE_SHEETS_WEBHOOK_URL=... npm run build
 // ---------------------------------------------------------------------------
 
-export const GOOGLE_SHEETS_WEBHOOK_URL = 
-  import.meta.env.VITE_GOOGLE_SHEETS_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbz3Bh5ynTwIAjQ4Q3-vaE7Lq41dvHHKGLrWnBEcavn8xbmT8HUwV_fAyPUuf6SWY_a4_Q/exec'
-
+export const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz3Bh5ynTwIAjQ4Q3-vaE7Lq41dvHHKGLrWnBEcavn8xbmT8HUwV_fAyPUuf6SWY_a4_Q/exec';
 // Protocol / Site options for the top-left dropdown ("ITF - Site: 9001").
 export const PROTOCOLS = ['ITF - Site: 9001']
 
